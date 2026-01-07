@@ -48,7 +48,8 @@ def main():
             "--save_freq", "1000",
             "--log_freq", "100",
             "--job_name", "up-down-smolvla",
-            "--device", "cuda",
+            "--policy.device", "cuda",
+            "--policy.push_to_hub", "false",
             # To resume an interrupted training, add:
             # "--resume", "true",
             # "--checkpoint_path", "path/to/your/checkpoint/folder",

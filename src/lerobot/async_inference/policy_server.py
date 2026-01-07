@@ -161,7 +161,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
             pretrained_path=policy_specs.pretrained_name_or_path,
             preprocessor_overrides={
                 "device_processor": device_override,
-                "rename_observations_processor": {"rename_map": policy_specs.rename_map},
+                "rename_observations_processor": {"rename_map": getattr(policy_specs, "rename_map", {})},
             },
             postprocessor_overrides={"device_processor": device_override},
         )
@@ -185,7 +185,8 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         timed_observation = pickle.loads(received_bytes)  # nosec
         deserialize_time = time.perf_counter() - start_deserialize
 
-        self.logger.debug(f"Received observation #{timed_observation.get_timestep()}")
+        obs_timestep = timed_observation.get_timestep()
+        self.logger.info(f"Received observation #{obs_timestep}")
 
         obs_timestep = timed_observation.get_timestep()
         obs_timestamp = timed_observation.get_timestamp()
@@ -235,7 +236,22 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
             inference_time = time.perf_counter() - start_time
 
             start_time = time.perf_counter()
-            actions_bytes = pickle.dumps(action_chunk)  # nosec
+            # Convert to TimedAction objects with numpy arrays for cross-version compatibility
+            actions_to_send = [
+                TimedAction(
+                    timestamp=a.timestamp,
+                    timestep=a.timestep,
+                    action=a.action.detach().cpu().numpy() if isinstance(a.action, torch.Tensor) else a.action
+                )
+                for a in action_chunk
+            ]
+
+            # Log the first action to see if values look reasonable
+            if len(actions_to_send) > 0:
+                first_action = actions_to_send[0].action
+                self.logger.info(f"First action in chunk: {first_action}")
+
+            actions_bytes = pickle.dumps(actions_to_send, protocol=4)  # nosec
             serialize_time = time.perf_counter() - start_time
 
             # Create and return the action chunk
@@ -290,7 +306,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         Observations not in queue are never run through the policy network"""
 
         if (
-            obs.must_go
+            getattr(obs, "must_go", True)
             or self.last_processed_obs is None
             or self._obs_sanity_checks(obs, self.last_processed_obs)
         ):
