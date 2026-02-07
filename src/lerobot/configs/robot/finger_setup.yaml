@@ -1,0 +1,25 @@
+
+# Finger Robot Configuration
+
+# Robot Identification
+type: finger_setup
+calibration_dir: .cache/calibration
+
+# Motor Configuration
+# We specify the motor model (sts3215) and its ID on the bus (1)
+motors:
+  finger: [1, "sts3215"]
+
+# Communication Port
+# This is where the MotorsBus connects
+port: /dev/ttyACM0
+
+# Camera Configuration
+# Uses default webcam (index 0)
+cameras:
+  webcam:
+    type: opencv
+    index_or_path: 0
+    fps: 30
+    width: 640
+    height: 480

@@ -43,8 +43,10 @@ from lerobot.robots import (  # noqa: F401
     lekiwi,
     make_robot_from_config,
     omx_follower,
+    omx_follower,
     openarm_follower,
     so_follower,
+    finger_setup,
 )
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,

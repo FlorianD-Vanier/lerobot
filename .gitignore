@@ -177,3 +177,6 @@ outputs/
 *.urdf
 *.xml
 *.part
+lerobot/hardware_specs.md
+lerobot/wiring.md
+lerobot/test_motor.py
