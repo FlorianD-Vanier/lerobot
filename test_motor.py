@@ -1,9 +1,11 @@
 import sys
 import os
 import time
+from pathlib import Path
 
 # Ensure src is in path so we can import lerobot
-sys.path.append(os.path.join(os.getcwd(), "lerobot", "src"))
+if (Path(__file__).parent / "src").exists():
+    sys.path.append(str(Path(__file__).parent / "src"))
 
 from lerobot.motors.feetech import FeetechMotorsBus
 from lerobot.motors.motors_bus import Motor, MotorNormMode

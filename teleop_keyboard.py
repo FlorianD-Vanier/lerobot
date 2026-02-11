@@ -8,8 +8,8 @@ from datetime import datetime
 from pathlib import Path
 
 # Add LeRobot to path
-sys.path.append(os.path.join(os.getcwd(), "lerobot", "src"))
-sys.path.append(os.path.join(os.getcwd(), "lerobot"))
+if (Path(__file__).parent / "src").exists():
+    sys.path.append(str(Path(__file__).parent / "src"))
 
 from lerobot.robots.finger.finger_robot import FingerRobot, FingerRobotConfig
 from lerobot.datasets.lerobot_dataset import LeRobotDataset

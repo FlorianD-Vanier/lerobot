@@ -2,9 +2,11 @@
 import sys
 import os
 import time
+from pathlib import Path
 
-sys.path.append(os.path.join(os.getcwd(), "lerobot", "src"))
-sys.path.append(os.path.join(os.getcwd(), "lerobot"))
+# Add LeRobot to path
+if (Path(__file__).parent / "src").exists():
+    sys.path.append(str(Path(__file__).parent / "src"))
 
 from lerobot.robots.finger.finger_robot import FingerRobot, FingerRobotConfig
 
