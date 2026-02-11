@@ -1,28 +1,38 @@
-
 import sys
 import os
 import time
 import argparse
 import cv2
 import numpy as np
-import csv
 from datetime import datetime
+from pathlib import Path
 
+# Add LeRobot to path
 sys.path.append(os.path.join(os.getcwd(), "lerobot", "src"))
 sys.path.append(os.path.join(os.getcwd(), "lerobot"))
 
 from lerobot.robots.finger.finger_robot import FingerRobot, FingerRobotConfig
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 def teleop_keyboard():
     parser = argparse.ArgumentParser(description="Keyboard Teleoperation & Data Recording for Finger Robot")
+    parser.add_argument("--repo-id", type=str, required=True, help="Dataset identifier (e.g. lerobot/finger_test)")
     parser.add_argument("--speed", type=int, default=100, help="Control Speed (0-200)")
-    parser.add_argument("--out", type=str, default="data/test_dataset", help="Output directory for recording")
+    parser.add_argument("--webcam", type=int, default=0, help="Camera Index (default: 0)")
+    parser.add_argument("--fps", type=int, default=30, help="Recording FPS (default: 30)")
+    parser.add_argument("--root", type=str, default="data/Clockwise_Counter_datasets", help="Root directory for dataset storage")
+    parser.add_argument("--task", type=str, default="Move finger continuously", help="Language instruction for the task")
+    
     args = parser.parse_args()
     
     SPEED = min(max(args.speed, 0), 200) # Clamp 0-200
+    FPS = args.fps
+    TASK_DESCRIPTION = args.task
     
     print("========================================")
     print(f"   Keyboard Teleoperation (Speed: {SPEED})   ")
+    print(f"   Dataset: {args.repo_id} (FPS: {FPS})      ")
+    print(f"   Task: {TASK_DESCRIPTION}                  ")
     print("========================================")
     print("Controls:")
     print("  [p] - Spin Clockwise (Right)")
@@ -31,30 +41,100 @@ def teleop_keyboard():
     print("  [SPACE] - Stop")
     print("  [ESC] - Quit")
     
-    # Create Output Dir
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dataset_dir = os.path.join(args.out, timestamp)
-    images_dir = os.path.join(dataset_dir, "images")
-    if not os.path.exists(images_dir):
-        os.makedirs(images_dir)
-        
-    csv_path = os.path.join(dataset_dir, "data.csv")
-    csv_file = open(csv_path, "w", newline="")
-    csv_writer = csv.writer(csv_file)
-    csv_writer.writerow(["frame_id", "timestamp", "action_velocity", "state_velocity"]) # Header
-    
+    # 1. Initialize Robot
     config = FingerRobotConfig()
+    config.cameras["webcam"].index_or_path = args.webcam
+    config.cameras["webcam"].fps = FPS
     robot = FingerRobot(config)
     
+    # 2. Define Dataset Features
+    # We need to explicitly define what we are recording
+    features = {
+        "observation.state.finger": {
+            "dtype": "float32",
+            "shape": (1,),
+            "names": ["velocity"]
+        },
+        "action.finger": {
+            "dtype": "float32",
+            "shape": (1,),
+            "names": ["velocity"]
+        },
+        "observation.images.webcam": {
+            "dtype": "video",
+            "shape": (480, 640, 3), # H, W, C
+            "names": ["height", "width", "channel"]
+        }
+    }
+
+    # 3. Create or Load Dataset
+    # Treat --root as the base directory, so we append the repo_id to it.
+    # e.g. data/Clockwise_Counter_datasets/lerobot/finger_test
+    if args.root is not None:
+        dataset_root = Path(args.root) / args.repo_id
+    else:
+        # Default behavior of LeRobotDataset is ~/.cache/huggingface/lerobot/<repo_id>
+        # We can pass None to let it handle it, or construct it ourselves.
+        dataset_root = None
+        
+    # Check if dataset already exists at that location
+    # Note: If dataset_root is None, we need to resolve it to check existence, 
+    # but LeRobotDataset handles resolution internally. 
+    # Simpler: Try to load, if fails, create.
+    
+    import shutil
+    try:
+        if dataset_root and dataset_root.exists():
+             print(f"Loading existing dataset properties from {dataset_root}")
+             dataset = LeRobotDataset(
+                repo_id=args.repo_id,
+                root=dataset_root
+             )
+        else:
+             print(f"Creating new dataset at {dataset_root if dataset_root else 'default cache'}")
+             dataset = LeRobotDataset.create(
+                repo_id=args.repo_id,
+                fps=FPS,
+                root=dataset_root,
+                features=features,
+                robot_type="finger_robot",
+                use_videos=True
+            )
+    except Exception as e:
+        # If loading fails (e.g. empty dir or corrupt), create a new timestamped dataset to preserve data
+        print(f"Load failed ({e}). Creating new dataset in timestamped subdirectory...")
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        if args.root:
+            new_root = Path(args.root) / timestamp
+        else:
+            new_root = Path.home() / ".cache/huggingface/lerobot" / timestamp
+            
+        print(f"New dataset root: {new_root / args.repo_id}")
+            
+        dataset = LeRobotDataset.create(
+                repo_id=args.repo_id,
+                fps=FPS,
+                root=new_root,
+                features=features,
+                robot_type="finger_robot",
+                use_videos=True
+            )
+            
     is_recording = False
-    frame_count = 0
+    
+    # Check if dataset.meta.total_episodes is available, otherwise default to 0
+    if hasattr(dataset, "meta") and dataset.meta is not None:
+         episode_index = dataset.meta.total_episodes
+    else:
+         episode_index = 0
     
     try:
         robot.connect(calibrate=False)
         print("Robot Connected! Focus on the camera window to control.")
         
         while True:
-            start_time = time.time()
+            start_loop_time = time.perf_counter()
             
             # 1. Get Observation (Camera + Motor State)
             obs = robot.get_observation()
@@ -62,6 +142,7 @@ def teleop_keyboard():
             # 2. Visualize Camera
             img = obs.get("observation.images.webcam")
             if img is not None:
+                # Convert RGB to BGR for OpenCV display
                 img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 
                 # Add Overlay Text
@@ -73,41 +154,52 @@ def teleop_keyboard():
                 cv2.imshow("Finger Robot Teleop", img_bgr)
             
             # 3. Handle Keyboard Input
-            key = cv2.waitKey(20) & 0xFF 
+            key = cv2.waitKey(1) & 0xFF 
             
             action_val = 0
             
             if key == ord('q'):
                 action_val = -SPEED
-                #print(f"Action: LEFT ({action_val})")
             elif key == ord('p'):
                 action_val = SPEED
-                #print(f"Action: RIGHT ({action_val})")
             elif key == ord('r'):
-                is_recording = not is_recording
-                print(f"Recording State: {is_recording}")
+                # Toggle Recording Logic
+                if not is_recording:
+                    print(f"Started Recording Episode {episode_index}")
+                    is_recording = True
+                else:
+                    print(f"Stopped Recording Episode {episode_index}")
+                    is_recording = False
+                    dataset.save_episode()
+                    episode_index += 1
+                    
             elif key == 27: # ESC
                 print("Exiting...")
+                if is_recording:
+                     # Save partial episode if quitting while recording
+                    print(f"Saving final episode {episode_index}")
+                    dataset.save_episode()
                 break
             
             # 4. Send Action
             robot.send_action({"finger": action_val})
             
             # 5. Record Data if Active
-            if is_recording and img is not None:
-                # Save Image
-                img_name = f"frame_{frame_count:06d}.jpg"
-                img_path = os.path.join(images_dir, img_name)
-                # Save RGB as BGR for OpenCV
-                cv2.imwrite(img_path, img_bgr)
-                
-                # Save CSV Row
-                state_vel = obs.get("observation.state.finger", 0)
-                csv_writer.writerow([frame_count, time.time(), action_val, state_vel])
-                
-                frame_count += 1
-                if frame_count % 30 == 0:
-                    print(f"Recorded {frame_count} frames...")
+            if is_recording:
+                # Prepare frame for dataset
+                frame = {
+                    "observation.state.finger": np.array([obs["observation.state.finger"]], dtype=np.float32),
+                    "observation.images.webcam": obs["observation.images.webcam"],
+                    "action.finger": np.array([action_val], dtype=np.float32),
+                    "task": TASK_DESCRIPTION
+                }
+                dataset.add_frame(frame)
+
+            # 6. Maintain Loop Rate (FPS)
+            dt = time.perf_counter() - start_loop_time
+            sleep_time = max(0, (1.0 / FPS) - dt)
+            if sleep_time > 0:
+                time.sleep(sleep_time)
             
     except Exception as e:
         print(f"Error: {e}")
@@ -116,10 +208,14 @@ def teleop_keyboard():
     finally:
         if 'robot' in locals() and robot.is_connected:
             robot.disconnect()
-        if 'csv_file' in locals():
-            csv_file.close()
+        
+        # Finalize dataset (encode videos, save stats)
+        if 'dataset' in locals():
+            print("Finalizing dataset...")
+            dataset.finalize()
+        
         cv2.destroyAllWindows()
-        print(f"Dataset saved to: {dataset_dir}")
+        print(f"Dataset saved to: {dataset.root}")
 
 if __name__ == "__main__":
     teleop_keyboard()
