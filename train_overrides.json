@@ -1,0 +1,47 @@
+{
+    "dataset": {
+        "repo_id": "ThavT/red_block_in_tape",
+        "video_backend": "pyav"
+    },
+    "policy": {
+        "type": "smolvla",
+        "pretrained_path": "lerobot/smolvla_base",
+        "push_to_hub": false,
+        "input_features": {
+            "observation.images.camera1": {
+                "type": "VISUAL",
+                "shape": [
+                    3,
+                    256,
+                    256
+                ]
+            },
+            "observation.images.camera2": {
+                "type": "VISUAL",
+                "shape": [
+                    3,
+                    256,
+                    256
+                ]
+            },
+            "observation.state": {
+                "type": "STATE",
+                "shape": [
+                    6
+                ]
+            }
+        }
+    },
+    "rename_map": {
+        "observation.images.cam_0": "observation.images.camera1",
+        "observation.images.cam_1": "observation.images.camera2"
+    },
+    "batch_size": 8,
+    "steps": 25000,
+    "save_freq": 5000,
+    "eval_freq": 5000,
+    "job_name": "smolvla_red_block_finetune",
+    "wandb": {
+        "enable": false
+    }
+}
