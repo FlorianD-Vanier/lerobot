@@ -55,10 +55,11 @@ The robot's visual observations (incoming from one or more RGB cameras) form a t
     \item \textbf{Tokenization (Pixel Shuffle):} The normalized images are processed by the encoder into a grid of $1,024$ patches ($32 \times 32$). To reduce computational load, smolVLA applies a \textbf{Pixel Shuffle (Space-to-Depth)} operation. Unlike a simple average which would "blur" information, this operation takes a $4 \times 4$ local neighborhood of patches (16 total) and \textbf{concatenates (stacks)} their feature vectors end-to-end. This is a deliberate trade-off: we reduce the sequence length from 1,024 to just \textbf{64 visual tokens}, but each token becomes 16 times "deeper" in information.
     \begin{itemize}
         \item \textbf{Overcoming the Quadratic Wall ($L^2$):} The computational cost of Self-Attention is \textbf{quadratic} in terms of the number of tokens ($L$). By shuffling 16 short vectors into 1 long vector, the sequence length is reduced by 16x. Because of the $L^2$ scaling, this reduces the total attention operations by \textbf{256x} ($16^2$), making the model significantly faster and more memory-efficient without losing raw data.
+        \item \textbf{The "Goldilocks" Trade-off (Why not 1 Token?):} While fewer tokens are faster, compressing the entire image into just \textbf{1 token} would create a massive \textbf{Information Bottleneck} (trying to fit all details into just 960 dimensions). Furthermore, the \textbf{Attention Mechanism} requires multiple tokens to compare relationships (e.g., comparing the robot's gripper to the object). The \textbf{64 tokens} maintain an $8 \times 8$ grid, preserving enough \textbf{Spatial Awareness} for the model to know *where* objects are relative to each other, while still bypassing the quadratic math explosion.
     \end{itemize}
     \item \textbf{Frozen Model Projection:} After the stacking, these deep vectors are passed through a \textbf{frozen linear projection} (resampler) that compresses them back to the model's standard hidden dimension of \textbf{960}. Because this projector is part of the original pretrained VLM, it has already learned a sophisticated "summary" function to preserve the most relevant visual details (like object edges and textures) within these 960 dimensions.
     \item \textbf{Multi-Camera Concatenation:} If the model uses multiple cameras (e.g., a "center" and a "wrist" camera), each image is processed independently through the same pipeline. The resulting 64-token sequences are simply \textbf{concatenated end-to-end}. For a two-camera setup, this results in a visual prefix of 128 tokens total before appending language and state data.
-    \item \textbf{Handling Missing Cameras:} If the policy expects up to 3 cameras but only 1 is active, the model generates fully padded ``dummy'' images filled with $-1$ to maintain a consistent tensor shape.
+    \item \textbf{Handling Missing Cameras:} If the policy expects up to 3 cameras (by default, it expects 3 cameras) but only 1 is active, the model generates fully padded ``dummy'' images filled with $-1$ to maintain a consistent tensor shape.
 \end{itemize}
 
 \textbf{Result of the Vision Pipeline:} For each camera observation at time $t$, the vision pipeline transforms a $512 \times 512$ RGB image into a sequence of \textbf{64 visual tokens}. Each token is a high-dimensional vector of length \textbf{960}. In a multi-camera setup (e.g., center and wrist), these sequences are simply appended together, forming the first part of the model's contextual memory. 
@@ -70,7 +71,10 @@ The language instruction (e.g., \textit{``Grasp the object''}) is processed in t
 \begin{itemize}
     \item \textbf{Phase 1: Tokenization (Discrete IDs):} The raw string is converted into a list of \textbf{discrete integer IDs} using the \texttt{SmolVLM2} dictionary. Note that the model uses \textit{sub-word tokenization}: common words like "the" are 1 token, but complex words like "grasping" may be split into two pieces ("grasp" + "ing"). Additionally, a mandatory **newline token** (\verb|\n|) is always appended to the end. Consequently, a 5-word sentence often results in 7 or 8 tokens.
     \item \textbf{Phase 2: Static Embedding (The Lookup Table):} These integer IDs are used to index into a giant \textbf{Embedding Matrix}. For each ID, the model retrieves a "static" 960-dimensional vector.
-    \item \textbf{Phase 3: Contextualization (The Transformer Pass):} These static vectors are concatenated with the visual tokens and passed through the $N$ layers of the \textbf{frozen transformer backbone}. Using \textit{Self-Attention}, the vectors are mathematically modified by their neighbors, absorbing information from both the other words and the visual features of the scene.
+    \item \textbf{Phase 3: Contextualization (The Transformer Pass):} These static vectors are concatenated with the visual tokens and passed together through the $N$ layers of the \textbf{frozen transformer backbone}. 
+    \begin{itemize}
+        \item \textbf{Multimodal Interaction:} Because they share the same attention space, language tokens can "attend" to visual tokens (and vice versa) during this pass. For example, the vector for the word "grasp" can mathematically align itself with the specific visual patches containing the robot's gripper or the target object \textit{before} the information ever reaches the Action Expert.
+    \end{itemize}
 \end{itemize}
 
 \textbf{Result of the Language Pipeline:} The instruction starts as text and ends as a sequence of \textbf{contextualized 960-dimensional vectors}. The number of vectors corresponds to the number of tokens (usually $\text{words} + 2 \text{ or } 3$), each having a length of \textbf{960}.
@@ -81,7 +85,11 @@ The language instruction (e.g., \textit{``Grasp the object''}) is processed in t
 To make informed decisions, smolVLA must know the current physical configuration of the robot (its "proprioception"). Unlike vision and language, which use complex frozen backbones, the robot state is integrated via a lightweight, learned projection:
 \begin{itemize}
     \item \textbf{Input Padding:} Different robots have different numbers of sensors (e.g., a 6-DOF arm vs. a 14-DOF bimanual robot). To maintain a consistent architecture, smolVLA zero-pads every state vector up to a fixed maximum dimension (typically \texttt{max\_state\_dim = 32}). If your robot has only 4 joints, the remaining 28 slots are filled with $0$s.
-    \item \textbf{The State Projector (\texttt{state\_proj}):} This padded vector is passed through a single \textbf{Trainable Linear Layer} (\texttt{nn.Linear}). Unlike the frozen VLM, this specific layer is trained during the fine-tuning process. This allows the model to learn exactly how to map your robot's specific joint angles into the VLM's shared semantic space.
+    \item \textbf{The State Projector (\texttt{state\_proj}):} This padded vector is passed through a single \textbf{Trainable Linear Layer} (\texttt{nn.Linear}). Unlike the frozen VLM backbone, this specific layer is actively trained. 
+    \begin{itemize}
+        \item \textbf{Pretrained Initialization:} When loading the base model, this layer comes initialized with pretrained weights. It already "knows" how to map physical states into the model's 960-dimensional space.
+        \item \textbf{Fine-Tuning adaptation:} Because the configuration sets \texttt{train\_state\_proj = True}, these weights continue to update during fine-tuning. This allows the model to leverage its pretrained robotics knowledge while slightly adjusting to perfectly match the mechanics of a new specific robot arm or task.
+    \end{itemize}
     \item \textbf{Linear Transformation:} Interestingly, this is a pure linear transformation (\(y = xW + b\)) \textit{without} a non-linear activation function (like ReLU or SiLU). A single linear layer is sufficient to project the continuous physical values into the high-dimensional hidden space.
 \end{itemize}
 
@@ -165,10 +173,21 @@ Just before the unified $X = (\text{Prefix}, \text{Suffix})$ enters the first la
 \subsection{Training Strategy: Learning the Field}
 \textbf{Python Implementation:} \texttt{modeling\_smolvla.py} (\texttt{forward})
 
-To make this flow work, the model must know the correct velocity for \textit{any} possible noise level. We "augment" the data during training to ensure the model is robust:
+To make this flow work, the model must know the correct velocity for \textit{any} possible noise level. smolVLA achieves this by "augmenting" the data within the generative process itself.
+
 \begin{itemize}
-    \item \textbf{Target Velocity ($u_\tau$):} Using the linear interpolation formula, the target is the constant velocity $u_\tau = \text{Noise} - \text{Action}_{clean}$.
-    \item \textbf{The Loss:} We minimize the \textbf{Mean Squared Error (MSE)} between the predicted velocity $v_\tau$ and the true target.
+    \item \textbf{Dynamic Noise Generation:} Every single time the training loop executes, the script generates a \textbf{fresh, unique Gaussian noise vector} for every sample in the batch. The model never sees the exact same "messy" action twice, even if it sees the same robot position.
+    
+    \item \textbf{Data Augmentation in Flow Space:} For each training sample, we also sample a fresh noise level $\tau \in [0, 1]$.
+    \begin{itemize}
+        \item \textbf{Infinite Variety:} One iteration the model may see a nearly-clean action ($\tau=0.1$), and the next it sees pure chaos ($\tau=0.9$). This forces the model to learn the \textit{general mathematical rule} of de-noising rather than memorizing specific noisy snapshots.
+    \end{itemize}
+
+    \item \textbf{The Ground Truth Velocity ($u_\tau$):} Unlike traditional models where the "label" is a fixed category, the label here is calculated \textbf{on the fly}.
+    \begin{itemize}
+        \item \textbf{Calculation:} While the network is only shown the noisy input $x_\tau$, the training script calculates the "ideal" direction in the GPU's memory: $u_\tau = \text{Noise} - \text{Action}_{clean}$.
+        \item \textbf{Grading the Model:} This $u_\tau$ is the "correct answer." The Action Expert predicts its own velocity $v_\tau$, and we "grade" it by calculating the \textbf{Mean Squared Error (MSE)} between $v_\tau$ and $u_\tau$. Once the weights are updated, this specific $u_\tau$ is discarded from memory.
+    \end{itemize}
 \end{itemize}
 
 \section{Model Inference}
