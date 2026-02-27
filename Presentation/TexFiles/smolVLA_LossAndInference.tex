@@ -84,4 +84,22 @@ In \texttt{modeling\_smolvla.py}, the \texttt{sample\_actions} function defines 
 \subsection{Why this process works}
 Because the network was trained specifically to predict $u_t = \text{Noise} - \text{Action}$, the velocity $v_t$ strongly points "away from the clean action." However, during inference, because we multiply by $dt$ which is \textbf{negative}, the update $dt \cdot v_t$ acts as a directional force pushing $x_t$ \textbf{towards} the clean action manifold. The vector field smoothly guides the chaotic particle through high-dimensional space until it uniquely settles into a viable robot behavior based on the visual and linguistic context.
 
+\section{Comparison: Flow Matching vs. Diffusion}
+It is very common to confuse Flow Matching with **Diffusion Models** (like DDPM or Stable Diffusion), as both involve adding and removing noise. However, there are critical mathematical and practical differences:
+
+\subsection{1. Path Geometry (Straight vs. Curved)}
+\begin{itemize}
+    \item \textbf{Diffusion:} Standard diffusion processes follow a curved probability path. The trajectories are stochastic (if using SDEs) or curved (if using the ODE-based Probability Flow). These curved paths are harder for the model to learn and often require thousands of steps for high-quality generation.
+    \item \textbf{Flow Matching:} smolVLA uses \textbf{Optimal Transport (OT) Flow Matching}. It defines the path as a \textbf{perfectly straight line} between $x_0$ and $x_1$. Because the path is straight, the "optimal" velocity is constant. This makes the learning task much simpler for the Transformer.
+\end{itemize}
+
+\subsection{2. Inference Speed}
+Because the Flow Matching trajectories are straight lines, the model can navigate from noise to data in significantly fewer steps. While Diffusion models often need 50 to 1,000 steps (unless using specialized distillation), smolVLA generates high-quality action trajectories in as few as \textbf{10 steps}. This is what allows smolVLA to run efficiently in real-time on robot hardware.
+
+\subsection{3. The Objective (Velocity vs. Noise)}
+\begin{itemize}
+    \item \textbf{Diffusion:} Typically predicts the \textit{noise} ($\epsilon$) added to the image. To get the update direction, you must perform mathematically complex scaling based on the "alpha" schedules of the noise.
+    \item \textbf{Flow Matching:} Directly predicts the \textbf{velocity field} ($v_t$). There is no complex noise schedule to maintain; the model simply outputs "which way to move" at every step.
+\end{itemize}
+
 \end{document}
