@@ -90,10 +90,17 @@ Because the network was trained specifically to predict $u_t = \text{Noise} - \t
 \section{Comparison: Flow Matching vs. Diffusion}
 It is very common to confuse Flow Matching with **Diffusion Models** (like DDPM or Stable Diffusion), as both involve adding and removing noise. However, there are critical mathematical and practical differences:
 
-\subsection{1. Path Geometry (Straight vs. Curved)}
+\subsection{1. Path Geometry: SDEs vs. ODEs}
 \begin{itemize}
-    \item \textbf{Diffusion:} Standard diffusion processes follow a curved probability path. The trajectories are stochastic (if using SDEs) or curved (if using the ODE-based Probability Flow). These curved paths are harder for the model to learn and often require thousands of steps for high-quality generation.
-    \item \textbf{Flow Matching:} smolVLA uses \textbf{Optimal Transport (OT) Flow Matching}. It defines the path as a \textbf{perfectly straight line} between $x_0$ and $x_1$. Because the path is straight, the "optimal" velocity is constant. This makes the learning task much simpler for the Transformer.
+    \item \textbf{Diffusion (SDEs):} Standard diffusion processes simulate noise addition over time using a \textbf{Stochastic Differential Equation (SDE)}:
+    \[ dx_t = f(x_t, t)dt + g(t)dw_t \]
+    Here, $f(x_t, t)$ is the predictable drift pulling the data, but $g(t)dw_t$ is the critical component: a continuous \textbf{Brownian Motion} injecting fresh, chaotic white noise at every infinitesimal step. This means that for a single data point tracking from clean action to noise, it doesn't travel straight; it takes a jagged, randomly fluctuating, and wildly curved path. Retracing this squiggly line backward during inference is difficult and necessitates taking hundreds or thousands of tiny steps.
+    
+    \item \textbf{Flow Matching (ODEs):} smolVLA relies instead on an \textbf{Ordinary Differential Equation (ODE)} with Optimal Transport:
+    \[ \frac{dx_\tau}{d\tau} = \text{NoiseMatrix} - \text{CleanChunk} \]
+    Notice the absence of the $dw_t$ term. Once the destination \text{NoiseMatrix} is randomly drawn for a specific prefix instance, the path is locked. The progression from the clean data to the noise is a deterministic, perfectly straight, high-dimensional vector. 
+    
+    \item \textbf{The Core Distinction:} While the training dataset "noises" actions uniquely across different epochs (the destination \text{NoiseMatrix} is different every time the same prefix appears), the trajectory of a \textbf{single corruption process} is constant. Therefore, the data is \textbf{noised in a Flow way} (picking a random destination, taking a straight line) and \textbf{cleaned in a Flow way} (walking straight back). Because the neural network leans to guide the system along these straight tracks rather than random squiggles, it only needs 10 large steps to confidently reconstruct the original data.
 \end{itemize}
 
 \subsection{2. Inference Speed}
