@@ -139,6 +139,7 @@ The second part of the model's input is the \textbf{Suffix}, which represents a 
         \item \textbf{Internal Non-linearity:} This MLP consists of two linear layers with a **SiLU (Swish)** activation function in between ($Linear \rightarrow SiLU \rightarrow Linear$).
         \item This MLP "squeezes" the combined information back into a final \textbf{720-dimensional Suffix Token}.
     \end{enumerate}
+    \item \textbf{Action Normalization:} It is important to note that the raw sensor values (e.g., motor angles ranging from $-180^\circ$ to $180^\circ$) are \textit{not} fed directly into the noising process. Before any noise is added, the actions are \textbf{normalized} using the Mean and Standard Deviation statistics of the training dataset. This scales the typical range to approximately $[-1, 1]$, ensuring that the Gaussian noise ($\mathcal{N}(0, 1)$) and the actions exist on the same mathematical scale.
     \textbf{Note on SiLU (Swish):} The Sigmoid Linear Unit (\(\text{SiLU}(x) = x \cdot \sigma(x) = \frac{x}{1 + e^{-x}}\)) is used here instead of standard ReLU. Unlike ReLU, it is smooth, differentiable everywhere, and allows a small amount of negative information to flow, which leads to better convergence in large Transformer models.
 \end{itemize}
 
@@ -176,6 +177,20 @@ Just before the unified $X = (\text{Prefix}, \text{Suffix})$ enters the first la
         \item \textbf{Learned Gains:} After this rescaling, the model applies a set of \textbf{960 trainable parameters (gains)}, allowing it to learn exactly which feature dimensions (e.g., specific visual patterns or joint angles) should be boosted or suppressed for optimal decision making.
     \end{itemize}
 \end{itemize}
+
+\section{Action Normalization and Safety}
+Because robot hardware uses specific physical units (like degrees for joints or meters for positions), and neural networks prefer small, stable numbers, smolVLA uses a strict normalization pipeline:
+
+\subsection{The Normalization Mapping}
+The model configuration (\texttt{SmolVLAConfig}) defines a \texttt{normalization\_mapping} where:
+\begin{itemize}
+    \item \textbf{Images:} Stay in their visual range (processed to $[-1, 1]$ for SigLIP).
+    \item \textbf{State (Proprioception):} Normalized using \texttt{MEAN\_STD}.
+    \item \textbf{Actions:} Normalized using \texttt{MEAN\_STD}.
+\end{itemize}
+
+\subsection{Why Normalize?}
+If we were adding Gaussian noise (scale $\approx 1.0$) to a motor angle of $150^\circ$, the noise would be virtually invisible ($150 \pm 1$ is basically still $150$). By scaling the $150^\circ$ down to a representation like $0.8$ before adding noise, the noise becomes a significant signal that the model can learn to filter. This makes the Flow Matching mathematically well-behaved across different types of robots.
 
 \section{The Training}
 

@@ -125,6 +125,14 @@ While traditional Behavioral Cloning (BC) is a "single-shot" guess, the 10-step 
     \item \textbf{Progressive Sharpening:} Like an artist sketching, the first few iterations establish the general "blob" of the trajectory, while the final steps reach for the millimeter-level precision required for stable robot control.
 \end{enumerate}
 
+\subsection{Why not start from Zero?}
+A natural question arises: why not use a simpler, deterministic schedule like $\text{ModifiedChunk}_\tau = (1-\tau) \cdot \text{CleanChunk}$ and start from zero ($0$)? While simpler, the literature favors random noise for three foundational reasons:
+\begin{itemize}
+    \item \textbf{Multimodality (The "Multiple Paths" Problem):} For a given image, there may be several valid ways to achieve a goal (e.g., picking up a cup from the left or right). If the model always starts at $0$, it often tries to "average" these paths, leading to failures. The \textbf{NoiseMatrix} acts as a "seed of intent"---random fluctuations bias the initial prediction just enough to commit the robot to one valid path Early on.
+    \item \textbf{Spatial Robustness (Field vs. Line):} If you only train to move from $0$ to the goal, the model learns a single thin "line" through space. If a human bumps the robot into an unseen coordinate, it breaks. By using Gaussian noise, the model learns a velocity for every possible point in a high-dimensional "cloud" (field), allowing it to recover from any interference.
+    \item \textbf{Mathematical Smoothing:} Gaussian noise acts as a form of natural data augmentation, forcing the network to ignore low-level "jitter" and focus on the deep semantic features of the context (the Prefix) to find the signal.
+\end{itemize}
+
 In summary, the mathematical "Noise" is simply the sandbox we use to teach the model how to be robust. The constant velocity ensures the straightest path to the truth, while the 10-step integration gives the model the "thinking time" to find it.
 
 \end{document}
