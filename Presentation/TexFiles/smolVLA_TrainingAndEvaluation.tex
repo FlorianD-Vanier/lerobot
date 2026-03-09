@@ -22,6 +22,16 @@ Training a \textbf{smolVLA} model involves fine-tuning a pretrained Vision-Langu
 
 This document clarifies the interpretation of training metrics (the Loss) and the specific evaluation strategy used in the LeRobot framework.
 
+\section{The Pre-Training Startup Sequence}
+Before the training logs start appearing, \texttt{lerobot-train} performs a sequence of initializations visible in the trace:
+
+\begin{enumerate}
+    \item \textbf{Config Summary:} A JSON-like block showing every parameter (batch size, learning rate, etc.). It confirms the \textbf{Effective Batch Size} (in your trace: $8 \times 1 = 8$).
+    \item \textbf{Dataset Creation:} Reports \texttt{num\_frames} ($16,914$) and \texttt{num\_episodes} ($33$). This is where the foundation of the epoch math is laid.
+    \item \textbf{Policy Initialization:} Confirms the model architecture (\texttt{smolvla}) and whether weights are loaded from a checkpoint. For VLM-based models, it also handles reduction of layers (e.g., reducing to 16 layers).
+    \item \textbf{Optimizer \& Scheduler Scaling:} An important log entry: \textit{"Auto-scaling LR scheduler"}. Since the actual steps ($26,000$) were less than the default decay steps ($30,000$), the scheduler automatically compressed the warmup and decay phases to fit the requested limit.
+\end{enumerate}
+
 \section{Interpreting the Training Loss}
 During training, the primary metric displayed in the logs (e.g., via \texttt{wandb} or terminal output) is the \textbf{Training Loss}. As established in the Flow Matching framework, this loss is the \textbf{Mean Squared Error (MSE)} between the target velocity vector $u_\tau$ and the model's predicted velocity $v_\tau$.
 
@@ -119,6 +129,93 @@ In such cases, the user relies entirely on the \textbf{Training Loss} to monitor
     \item The user wants to speed up training by avoiding the overhead of running episodes.
     \item The goal is to first ensure the model can converge on the expert manifold before testing live behaviors.
 \end{itemize}
+
+\section{Anatomy of the Training Logs}
+When running \texttt{lerobot-train}, the terminal outputs a recurring line of metrics. Understanding these is key to monitoring the health of the finetuning process.
+
+\begin{quote}
+\texttt{step:25K smpl:202K ep:393 epch:11.92 loss:0.010 grdn:0.222 lr:2.8e-06 updt\_s:1.233 data\_s:0.011}
+\end{quote}
+
+\subsection{The Math of Epochs and Steps}
+A frequent point of confusion is how \texttt{step}, \texttt{ep}, and \texttt{epch} relate. Using the values from your trace:
+
+\begin{itemize}
+    \item \textbf{The Frame Count math:} 
+    You calculated $\approx 16,830$ frames ($33 \text{ episodes} \times 17\text{s} \times 30\text{Hz}$). The reported $16,914$ is slightly higher (a difference of only 84 frames). This is normal: it simply means some episodes were slightly longer than 17.0s (e.g., 17.1s). This small variation is typical in real-world recorded data.
+    
+    \item \textbf{Why is an Epoch $\approx 2,100$ steps?} 
+    An epoch is one full pass through the dataset. With $16,914$ frames and a batch size of $8$, the math is:
+    \[ \text{Steps per Epoch} = \frac{16,914 \text{ frames}}{8 \text{ frames/step}} \approx 2,114 \text{ steps} \text{ (confirming your observation)} \]
+    
+    \item \textbf{The Episode Count discrepancy:}
+    If you counted $25$ episodes in your local \texttt{debug\_data/file-000.csv} but the trainer says $33$, it is because the dataset is split into \textbf{two chunks} on the Hugging Face hub: \texttt{file-000.parquet} and \texttt{file-001.parquet}. Your local inspection script only downloaded the first chunk (episodes 0--24). The \texttt{lerobot-train} tool automatically loads all available files, totaling 33 episodes (indices 0--32).
+    \[ \text{Epoch} = \frac{393 \text{ episodes total}}{33 \text{ episodes/dataset}} \approx 11.9 \text{ epochs} \]
+    This matches the log's \texttt{epch:11.92}.
+\end{itemize}
+
+\subsection{Performance and Health Metrics}
+\begin{itemize}
+    \item \textbf{Gradient Norm (grdn):} You observed a stable \texttt{0.222}. This is the L2 norm of the gradient vector for the $\approx 100M$ learnable parameters. Since the training clip value is set to \texttt{10.0}, a value of \texttt{0.222} is very "quiet." It indicates the model is converging smoothly on the target flow field ($u_t = \text{noise} - \text{action}$) without any unstable "jumps" in the weight space.
+    \item \textbf{Learning Rate (lr):} LeRobot uses a \textbf{Cosine Decay with Warmup} scheduler. 
+    \begin{itemize}
+        \item \textbf{Phase 1: Warmup} ($0 \to 1,000$ steps): LR rises from $0 \to 10^{-4}$.
+        \item \textbf{Phase 2: Cosine Decay} ($1,000 \to 26,000$ steps): LR follows a cosine curve down to the "decay" value of $2.5 \times 10^{-6}$.
+    \end{itemize}
+    In your trace at step 25K, the LR is \texttt{2.8e-06}, confirming you are at the very final refinement stage of the training.
+    \item \textbf{Update Time (updt\_s):} Why care about forward+backward time? Because it dictates your total training time. At $1.2$s/step, training $26K$ steps takes $\approx 8.6$ hours. If this duration suddenly increases, it might indicate GPU overheating or memory swapping.
+    \item \textbf{Data Loading (data\_s):} This is the time to fetch frames and construct the "prefix" (image/state embeddings). If this is low ($0.01$s), your CPU is successfully keeping the GPU fed with data.
+\end{itemize}
+
+\section{Case Study: Interpreting the 0.08 to 0.01 Transition}
+A common observation in \textbf{smolVLA} finetuning is a rapid initial drop in loss, followed by a long tail of refinement. Let's analyze a session where the loss starts at $0.08$ (around step 250) and converges to $0.01$ (around step 25,000).
+
+\subsection{Stage 1: The Coarse Alignment ($Loss \approx 0.08$)}
+At the start of finetuning, the pretrained "frozen" VLM has a general understanding of images, but the "Expert" layers have not yet aligned the random Gaussian noise with the specific motor commands of the new robot.
+\begin{itemize}
+    \item \textbf{Error Magnitude:} $\text{RMSE} = \sqrt{0.08} \approx 0.28$.
+    \item \textbf{Result:} In the range of $[-4, 4]$, an error of $0.28$ is significant. The model understands the \textit{direction} of movement but produces "jittery" or noisy trajectories.
+\end{itemize}
+
+\subsection{Physical Translation: From MSE to Degrees}
+A loss of $0.01$ feels abstract. To understand it, we can derive the physical error in degrees ($^\circ$) by reversing the normalization steps.
+
+\subsubsection*{The Derivation}
+Let $D$ be the raw robot data (in degrees) and $S$ be the scaled data (normalized to $\sigma = 1.0$). The transformation is roughly $D = s \cdot S$, where $s$ is the dataset standard deviation.
+\begin{enumerate}
+    \item \textbf{Scaled Error:} The training metric is $\text{MSE} = E[(S - P_S)^2] = 0.01$.
+    \item \textbf{Physical Error:} When we scale back to raw units ($P_D = s \cdot P_S$), the error becomes:
+    \[ E[(D - P_D)^2] = E[(sS - sP_S)^2] = s^2 \cdot E[(S - P_S)^2] = s^2 \cdot 0.01 \]
+    \item \textbf{Root Mean Squared Error (RMSE):} Taking the square root gives us the average physical error per dimension:
+    \[ \text{RMSE}_{raw} = \sqrt{s^2 \cdot 0.01} = s \cdot 0.1 \]
+    \item \textbf{Numerical Result:} With your dataset's average $\sigma \approx 30.5^\circ$:
+    \[ \text{Error} \approx 30.5 \times 0.1 = \textbf{3.05}^\circ \]
+\end{enumerate}
+
+\subsubsection*{Physical Example}
+For a $6$ DoF robot, a loss of \textbf{$0.01$} means that for every timestep in your $50$-step chunk, the prediction is remarkably close to the expert. 
+
+Imagine a single action frame:
+\begin{itemize}
+    \item \textbf{Expert (Degrees):} $[15, 20, 30, 42, 10, 5]$
+    \item \textbf{Model Prediction:} $[18, 17, 33, 39, 13, 8]$  \textit{(Example error of $\approx 3^\circ$ per joint)}
+\end{itemize}
+
+At $0.08$ loss, the error was $\approx 8.5^\circ$ per joint (noticeably "shaky"). At $0.01$, the error is only \textbf{$3^\circ$}. For high-dimensional control, achieving a $3^\circ$ variance starting from random noise is the hallmark of a successfully converged policy.
+
+\subsubsection*{The Geometric Error Budget}
+Let's analyze the physical consequence for your specific robot arm ($30$~cm length) and the goal for future training.
+\begin{itemize}
+    \item \textbf{Joint Configuration:} 3 sensors for the main arm joints, 3 for the gripper. 
+    \item \textbf{Average Error:} If each joint has an error $E[X_i] \approx 3^\circ$ ($\pi/60$~rad).
+    \item \textbf{Total Vector Magnitude:} Assuming independent errors, the magnitude of the angular error vector is:
+    \[ \|\mathbf{e}\| \approx \frac{\pi}{60} \cdot \sqrt{3} \text{ rad} \]
+    \item \textbf{End-Effector Deviation:} At a lever arm of $L = 30$~cm, the average positional error at the tip is roughly:
+    \[ \text{Error}_{tip} \approx L \cdot \frac{\pi}{60} \cdot \frac{\sqrt{3}}{2} \approx \textbf{1.36 cm} \text{ (approaching 1.5 cm)} \]
+    \item \textbf{The Ideal Goal ($MSE = 0.001$):} A $1.5$~cm deviation is significant for a small gripper. To achieve true precision (cutting the error by 3 down to $1^\circ$), the required Loss is:
+    \[ \text{Target MSE} \approx \left(\frac{1}{3} \cdot \text{Current RMSE}\right)^2 \approx \left(\frac{0.1}{3}\right)^2 \approx \textbf{0.0011} \]
+\end{itemize}
+Achieving a loss of \textbf{0.001} would correspond to a sub-centimeter tip precision, allowing for extremely delicate manipulation.
 
 \section{Summary}
 \begin{itemize}

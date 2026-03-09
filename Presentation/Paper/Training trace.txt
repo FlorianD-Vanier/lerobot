@@ -1,0 +1,171 @@
+ PYTHONPATH=src .venv/bin/python src/lerobot/scripts/lerobot_train.py \
+  --config_path=outputs/train/2026-02-17/17-58-52_smolvla_red_block_finetune/checkpoints/025000/pretrained_model/train_config.json \
+  --save_freq=500 \
+  --eval_freq=250 \
+  --resume=true \
+  --steps=26000
+
+WARNING:root:'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder
+INFO 2026-03-07 15:58:55 ot_train.py:195 {'batch_size': 8,
+ 'checkpoint_path': 'outputs/train/2026-02-17/17-58-52_smolvla_red_block_finetune/checkpoints/025000',
+ 'dataset': {'episodes': None,
+             'image_transforms': {'enable': False,
+                                  'max_num_transforms': 3,
+                                  'random_order': False,
+                                  'tfs': {'affine': {'kwargs': {'degrees': [-5.0,
+                                                                            5.0],
+                                                                'translate': [0.05,
+                                                                              0.05]},
+                                                     'type': 'RandomAffine',
+                                                     'weight': 1.0},
+                                          'brightness': {'kwargs': {'brightness': [0.8,
+                                                                                   1.2]},
+                                                         'type': 'ColorJitter',
+                                                         'weight': 1.0},
+                                          'contrast': {'kwargs': {'contrast': [0.8,
+                                                                               1.2]},
+                                                       'type': 'ColorJitter',
+                                                       'weight': 1.0},
+                                          'hue': {'kwargs': {'hue': [-0.05,
+                                                                     0.05]},
+                                                  'type': 'ColorJitter',
+                                                  'weight': 1.0},
+                                          'saturation': {'kwargs': {'saturation': [0.5,
+                                                                                   1.5]},
+                                                         'type': 'ColorJitter',
+                                                         'weight': 1.0},
+                                          'sharpness': {'kwargs': {'sharpness': [0.5,
+                                                                                 1.5]},
+                                                        'type': 'SharpnessJitter',
+                                                        'weight': 1.0}}},
+             'repo_id': 'ThavT/red_block_in_tape',
+             'revision': None,
+             'root': None,
+             'streaming': False,
+             'use_imagenet_stats': True,
+             'video_backend': 'pyav'},
+ 'env': None,
+ 'eval': {'batch_size': 50, 'n_episodes': 50, 'use_async_envs': False},
+ 'eval_freq': 250,
+ 'job_name': 'smolvla_red_block_finetune',
+ 'log_freq': 200,
+ 'num_workers': 4,
+ 'optimizer': {'betas': [0.9, 0.95],
+               'eps': 1e-08,
+               'grad_clip_norm': 10.0,
+               'lr': 0.0001,
+               'type': 'adamw',
+               'weight_decay': 1e-10},
+ 'output_dir': 'outputs/train/2026-02-17/17-58-52_smolvla_red_block_finetune',
+ 'peft': None,
+ 'policy': {'adapt_to_pi_aloha': False,
+            'add_image_special_tokens': False,
+            'attention_mode': 'cross_attn',
+            'chunk_size': 50,
+            'device': 'cuda',
+            'empty_cameras': 0,
+            'expert_width_multiplier': 0.75,
+            'freeze_vision_encoder': True,
+            'input_features': {'observation.images.camera1': {'shape': [3,
+                                                                        256,
+                                                                        256],
+                                                              'type': <FeatureType.VISUAL: 'VISUAL'>},
+                               'observation.images.camera2': {'shape': [3,
+                                                                        256,
+                                                                        256],
+                                                              'type': <FeatureType.VISUAL: 'VISUAL'>},
+                               'observation.state': {'shape': [6],
+                                                     'type': <FeatureType.STATE: 'STATE'>}},
+            'license': None,
+            'load_vlm_weights': False,
+            'max_action_dim': 32,
+            'max_period': 4.0,
+            'max_state_dim': 32,
+            'min_period': 0.004,
+            'n_action_steps': 50,
+            'n_obs_steps': 1,
+            'normalization_mapping': {'ACTION': <NormalizationMode.MEAN_STD: 'MEAN_STD'>,
+                                      'STATE': <NormalizationMode.MEAN_STD: 'MEAN_STD'>,
+                                      'VISUAL': <NormalizationMode.IDENTITY: 'IDENTITY'>},
+            'num_expert_layers': -1,
+            'num_steps': 10,
+            'num_vlm_layers': 16,
+            'optimizer_betas': [0.9, 0.95],
+            'optimizer_eps': 1e-08,
+            'optimizer_grad_clip_norm': 10.0,
+            'optimizer_lr': 0.0001,
+            'optimizer_weight_decay': 1e-10,
+            'output_features': {'action': {'shape': [6],
+                                           'type': <FeatureType.ACTION: 'ACTION'>}},
+            'pad_language_to': 'longest',
+            'prefix_length': -1,
+            'pretrained_path': 'outputs/train/2026-02-17/17-58-52_smolvla_red_block_finetune/checkpoints/025000/pretrained_model',
+            'private': None,
+            'push_to_hub': False,
+            'repo_id': None,
+            'resize_imgs_with_padding': [512, 512],
+            'rtc_config': None,
+            'scheduler_decay_lr': 2.5e-06,
+            'scheduler_decay_steps': 30000,
+            'scheduler_warmup_steps': 1000,
+            'self_attn_every_n_layers': 2,
+            'tags': None,
+            'tokenizer_max_length': 48,
+            'train_expert_only': True,
+            'train_state_proj': True,
+            'type': 'smolvla',
+            'use_amp': False,
+            'use_cache': True,
+            'use_delta_joint_actions_aloha': False,
+            'use_peft': False,
+            'vlm_model_name': 'HuggingFaceTB/SmolVLM2-500M-Video-Instruct'},
+ 'rabc_epsilon': 1e-06,
+ 'rabc_head_mode': 'sparse',
+ 'rabc_kappa': 0.01,
+ 'rabc_progress_path': None,
+ 'rename_map': {'observation.images.cam_0': 'observation.images.camera1',
+                'observation.images.cam_1': 'observation.images.camera2'},
+ 'resume': True,
+ 'save_checkpoint': True,
+ 'save_freq': 500,
+ 'scheduler': {'decay_lr': 2.5e-06,
+               'num_decay_steps': 30000,
+               'num_warmup_steps': 1000,
+               'peak_lr': 0.0001,
+               'type': 'cosine_decay_with_warmup'},
+ 'seed': 1000,
+ 'steps': 26000,
+ 'tolerance_s': 0.0001,
+ 'use_policy_training_preset': True,
+ 'use_rabc': False,
+ 'wandb': {'disable_artifact': False,
+           'enable': False,
+           'entity': None,
+           'mode': None,
+           'notes': None,
+           'project': 'lerobot',
+           'run_id': None}}
+INFO 2026-03-07 15:58:55 ot_train.py:203 Logs will be saved locally.
+INFO 2026-03-07 15:58:55 ot_train.py:215 Creating dataset
+INFO 2026-03-07 15:58:56 ot_train.py:233 Creating policy
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+INFO 2026-03-07 15:59:20 ot_train.py:288 Creating optimizer and scheduler
+INFO 2026-03-07 15:59:20 hedulers.py:105 Auto-scaling LR scheduler: num_training_steps (26000) < num_decay_steps (30000). Scaling warmup: 1000 → 866, decay: 30000 → 26000 (scale factor: 0.867)
+INFO 2026-03-07 15:59:21 ot_train.py:323 Output dir: outputs/train/2026-02-17/17-58-52_smolvla_red_block_finetune
+INFO 2026-03-07 15:59:21 ot_train.py:330 cfg.steps=26000 (26K)
+INFO 2026-03-07 15:59:21 ot_train.py:331 dataset.num_frames=16914 (17K)
+INFO 2026-03-07 15:59:21 ot_train.py:332 dataset.num_episodes=33
+INFO 2026-03-07 15:59:21 ot_train.py:335 Effective batch size: 8 x 1 = 8
+INFO 2026-03-07 15:59:21 ot_train.py:336 num_learnable_params=99880992 (100M)
+INFO 2026-03-07 15:59:21 ot_train.py:337 num_total_params=450046176 (450M)
+INFO 2026-03-07 15:59:21 ot_train.py:393 Start offline training on a fixed dataset, with effective batch size: 8
+/home/florian/Work/lerobot/.venv/lib/python3.12/site-packages/torchvision/io/_video_deprecation_warning.py:5: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
+INFO 2026-03-07 16:03:30 ot_train.py:423 step:25K smpl:202K ep:393 epch:11.92 loss:0.010 grdn:0.222 lr:2.8e-06 updt_s:1.233 data_s:0.011
+INFO 2026-03-07 16:07:45 ot_train.py:423 step:25K smpl:203K ep:396 epch:12.01 loss:0.010 grdn:0.213 lr:2.7e-06 updt_s:1.268 data_s:0.007
+INFO 2026-03-07 16:09:53 ot_train.py:443 Checkpoint policy after step 25500
+INFO 2026-03-07 16:12:04 ot_train.py:423 step:26K smpl:205K ep:400 epch:12.11 loss:0.010 grdn:0.213 lr:2.6e-06 updt_s:1.275 data_s:0.007
+INFO 2026-03-07 16:16:22 ot_train.py:423 step:26K smpl:206K ep:403 epch:12.20 loss:0.010 grdn:0.226 lr:2.5e-06 updt_s:1.283 data_s:0.007
+INFO 2026-03-07 16:20:40 ot_train.py:443 Checkpoint policy after step 26000
+INFO 2026-03-07 16:20:42 ot_train.py:514 End of training
