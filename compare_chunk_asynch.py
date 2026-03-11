@@ -19,6 +19,7 @@ from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.utils.constants import ACTION, OBS_STATE
+from huggingface_hub import hf_hub_download
 
 def main():
     parser = argparse.ArgumentParser()
@@ -36,21 +37,36 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # 1. Setup metadata and Dataset
-    train_config_path = Path(args.policy_path) / "train_config.json"
+    # 1. Detect Remote vs Local and Load rename_map
+    policy_id = args.policy_path
+    is_local = Path(policy_id).exists()
     rename_map = {}
-    if train_config_path.exists():
-        with open(train_config_path, "r") as f:
-            train_cfg = json.load(f)
-            rename_map = train_cfg.get("rename_map", {})
+    
+    if is_local:
+        train_config_path = Path(policy_id) / "train_config.json"
+        if train_config_path.exists():
+            with open(train_config_path, "r") as f:
+                train_cfg = json.load(f)
+                rename_map = train_cfg.get("rename_map", {})
+    else:
+        print(f"Policy path not found locally. Attempting to fetch metadata from HF Hub: {policy_id}")
+        try:
+            train_config_path = hf_hub_download(repo_id=policy_id, filename="train_config.json")
+            with open(train_config_path, "r") as f:
+                train_cfg = json.load(f)
+                rename_map = train_cfg.get("rename_map", {})
+        except Exception as e:
+            print(f"Warning: Could not fetch train_config.json from Hub ({e}). Proceeding without rename_map.")
 
     print(f"Loading dataset {args.repo_id}...")
     dataset = LeRobotDataset(args.repo_id)
     
     # 2. Setup Policy
-    print(f"Loading policy from {args.policy_path}...")
-    policy_config = PreTrainedConfig.from_pretrained(args.policy_path)
-    policy_config.pretrained_path = args.policy_path
+    print(f"Loading policy config from {policy_id}...")
+    policy_config = PreTrainedConfig.from_pretrained(policy_id)
+    # Ensure pretrained_path matches what LeRobot expects for subsequent loading
+    policy_config.pretrained_path = policy_id
+    
     policy = make_policy(cfg=policy_config, ds_meta=dataset.meta, rename_map=rename_map)
     policy.eval()
     policy.to(device)
@@ -60,7 +76,7 @@ def main():
     # 3. Setup Processors
     preprocessor, postprocessor = make_pre_post_processors(
         policy_cfg=policy.config,
-        pretrained_path=args.policy_path,
+        pretrained_path=policy_id,
         dataset_stats=dataset.meta.stats,
         preprocessor_overrides={"rename_observations_processor": {"rename_map": rename_map}}
     )
@@ -150,8 +166,13 @@ def main():
         if weighted_sum is not None:
             executed_action = weighted_sum / total_weight
         else:
-            # Fallback if no chunk arrived yet (shouldn't happen with kickoff at 0)
-            executed_action = np.zeros_like(active_chunks[0]["actions"][0])
+            # Fallback: if queue is empty (idle gap), hold the last executed action
+            if executed_trajectory:
+                executed_action = executed_trajectory[-1]
+            else:
+                # Shape fallback for the very first step
+                action_dim = dataset.meta.stats[ACTION]["mean"].shape[-1]
+                executed_action = np.zeros(action_dim)
 
         executed_trajectory.append(executed_action)
         
@@ -164,19 +185,24 @@ def main():
             ground_truth_trajectory.append(ground_truth_trajectory[-1] if ground_truth_trajectory else executed_action)
 
         # 3. Check Async Trigger
-        # Condition: remaining_unexecuted_steps_in_latest_chunk / chunk_size < g
-        # Note: In real life, the robot client tracks the "available buffer".
-        # We can approximate by checking the latest chunk's future coverage.
-        
-        latest_chunk = active_chunks[-1]
-        remaining_in_latest = (latest_chunk["creation_time"] + chunk_size) - t
-        
-        # If queue is low AND we don't have a request pending
-        if (remaining_in_latest / chunk_size) < args.g_threshold and in_flight_request is None:
-            in_flight_request = {
-                "creation_time": t,
-                "arrival_time": t + args.latency_steps
-            }
+        if not active_chunks:
+            # If the queue is fully empty, we definitely wait for the in-flight,
+            # but if there isn't one, we MUST trigger one immediately.
+            if in_flight_request is None:
+                in_flight_request = {
+                    "creation_time": t,
+                    "arrival_time": t + args.latency_steps
+                }
+        else:
+            latest_chunk = active_chunks[-1]
+            remaining_in_latest = (latest_chunk["creation_time"] + chunk_size) - t
+            
+            # If queue is low AND we don't have a request pending
+            if (remaining_in_latest / chunk_size) < args.g_threshold and in_flight_request is None:
+                in_flight_request = {
+                    "creation_time": t,
+                    "arrival_time": t + args.latency_steps
+                }
 
     # 5. Plotting
     print(f"Creating plots in {args.output_dir}...")
