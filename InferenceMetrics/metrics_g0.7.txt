@@ -1,0 +1,18 @@
+Asynchronous Inference Evaluation Metrics
+==========================================
+Policy: /home/florian/Work/lerobot/outputs/train/2026-02-17/17-58-52_smolvla_red_block_finetune/checkpoints/026000/pretrained_model
+Dataset: ThavT/red_block_in_tape
+Episode: 0, Start Timestamp: 9.1
+Number of Independent Runs: 100
+Steps per Run: 50
+g-threshold: 0.7
+Latency Steps: 5
+Decay constant (m): 0.01
+
+Results (Mean Absolute Error per Sensor/Dimension):
+Dimension 0: Avg Error = 4.345131, Std Dev = 1.100552
+Dimension 1: Avg Error = 5.034894, Std Dev = 0.962361
+Dimension 2: Avg Error = 3.418042, Std Dev = 1.109255
+Dimension 3: Avg Error = 3.062094, Std Dev = 0.757111
+Dimension 4: Avg Error = 1.888499, Std Dev = 0.492668
+Dimension 5: Avg Error = 0.509989, Std Dev = 0.194224
