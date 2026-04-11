@@ -1,0 +1,17 @@
+# How to use compile.sh
+
+To compile a LaTeX file into a PDF and save it in the Presentation/PDF directory, run the following command from the repository root:
+
+  ./Presentation/compile.sh Presentation/TexFiles/YOUR_FILE.tex
+
+### Examples:
+- For ACT Architecture:
+  ./Presentation/compile.sh Presentation/TexFiles/ACT_Architecture.tex
+
+- For smolVLA Architecture (if applicable):
+  ./Presentation/compile.sh Presentation/TexFiles/smolVLA_Architecture.tex
+
+### Features:
+1.  **Direct Output**: The resulting PDF is automatically moved to the `Presentation/PDF` folder.
+2.  **Clean Workspace**: The script automatically deletes temporary LaTeX build files (.aux, .log, .out, .toc) after a successful run.
+3.  **Non-Interactive**: Runs in nonstop mode, so it won't hang on minor warnings.

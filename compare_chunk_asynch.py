@@ -227,7 +227,7 @@ def main():
     plt.suptitle(f"smolVLA Asynchronous Inference Simulation\ng={args.g_threshold}, Latency={args.latency_steps}, n={chunk_size}")
     plt.tight_layout()
     
-    save_path = Path(args.output_dir) / "async_simulation_comparison.png"
+    save_path = Path(args.output_dir) / "async_simulation_comparison_redblockinorangebox.png"
     plt.savefig(save_path)
     print(f"Plot saved to {save_path}")
 
