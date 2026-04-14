@@ -20,12 +20,14 @@
 The complete training of ACT relies on two mathematical penalties working in tandem. The model must simultaneously become a precise physical imitator and an efficient style summarizer. The objective function evaluated during each step is defined as:
 \[ \mathcal{L}_{total} = \mathcal{L}_{reconst} + \beta \mathcal{L}_{KL} \]
 
-\subsection{L1 Reconstruction Loss ($\mathcal{L}_{reconst}$)}
-The primary goal of the Policy Decoder is to execute actions that match the human expert's original demonstration. While deep learning often relies on Mean Squared Error (L2 Loss) to measure differences, the ACT authors chose a variant of the \textbf{L1 Loss}. 
+\subsection{L1 Reconstruction Loss ($\mathcal{L}_{reconst}$) vs. MSE}
+The primary goal of the Policy Decoder is to execute actions that match the human expert's original demonstration. 
 
-Technically, pure L1 loss ($|x|$) is non-differentiable at exactly zero. To solve this, implementations usually use \textbf{SmoothL1Loss} (also known as Huber Loss). This function is quadratic when the error is very small (making it smooth and differentiable at zero) and linear when the error is large. 
-\[ \mathcal{L}_{reconst} = \text{SmoothL1}(\hat{a}, a) \]
-L1 Loss is deliberately chosen over L2 because L2 heavily penalizes large outliers but is very forgiving of tiny errors. In physical robotics, being "slightly off" across many joints leads to catastrophic, "blurry" movements. L1 Loss forces much tighter adherence to the precise, fine-grained details required for manipulation.
+\textbf{A Note on the Paper's Typo:} If you look closely at the original ACT paper, Algorithm 1 (Line 9) states that $\mathcal{L}_{reconst}$ is calculated using MSE (Mean Squared Error, or L2 Loss). However, this is a famous typo in the pseudocode. In Section IV.C (page 6) of the text, the authors explicitly correct this: \textit{"We use L1 loss for reconstruction instead of the more common L2 loss: we noted that L1 loss leads to more precise modeling of the action sequence."}
+
+To calculate this, the model compares the predicted action chunk ($\hat{a}_{t:t+k}$) against the ground-truth human chunk ($a_{t:t+k}$). Both of these are tensors of shape \texttt{[k, action\_dim]}. The L1 loss computes the absolute difference element-by-element across the entire chunk:
+\[ \mathcal{L}_{reconst} = \text{SmoothL1}(\hat{a}, a) = \frac{1}{k \cdot d_{action}} \sum_{t=1}^{k} \sum_{j=1}^{d_{action}} \left| a_{t,j} - \hat{a}_{t,j} \right| \]
+(Note: Implementations often use \textbf{SmoothL1Loss} quadratic close to 0 and linear after (Huber Loss) to ensure differentiability precisely at zero). The L1 Loss is deliberately chosen over the pseudocode's MSE because MSE heavily penalizes large outliers but is very forgiving of tiny errors. In physical robotics, being "slightly off" across many joints leads to catastrophic, "blurry" movements. L1 forces much tighter adherence to precise fine-grained details.
 
 \subsection{KL Divergence ($\mathcal{L}_{KL}$) and The Multi-Modal Averaging Problem}
 One might argue: if we just set $z=\vec{0}$ at inference time anyway, why do we bother having a style variable $z$ during training? Why not just train a single Encoder-Decoder without the CVAE and force it to learn one single way to do the task?
@@ -45,9 +47,21 @@ By enforcing a massive KL Divergence penalty ($\beta=10$), we violently force th
 \begin{itemize}
     \item Because we forced all valid styles to cluster around zero, setting $z=\vec{0}$ at inference time acts as a clean "tie-breaker."
     \item It guarantees that the Policy Decoder will execute the most robust, dominant, and "safest" average of the strategies it learned, without executing conflicting physical movements. 
+    \item The "Canonical Baseline": By penalizing large $z$ values, the model learns to represent $z=0$ as the absolute "standard" way of completing the task. Unique human styles are treated as small variations branching off from this golden baseline.
+    \item Resilience: Setting $z=\vec{0}$ at inference strips away all noisy human variations and drops the robot directly onto this standard, highly-resilient baseline, guaranteeing the safest possible movement.
 \end{itemize}
 
-\section{Optimization Procedure}
-The entire architecture—including both the CVAE Encoder (parameters $\phi$) and the Policy Transformer (parameters $\theta$)—is optimized simultaneously in a single backward pass. By combining both loss constraints, the gradients flow backward from the Decoder's action outputs, through the sample vector $z$, and all the way back up to the Encoder's attention layers. This forces the model to agree on a style language that is both compact enough to satisfy the KL constraint and descriptive enough to allow flawless physical reconstruction.
+\section{Optimization Procedure: The ADAM Optimizer}
+The entire architecture—including both the CVAE Encoder (parameters $\phi$) and the Policy Transformer (parameters $\theta$)—is optimized simultaneously in a single backward pass. By combining both loss constraints, the gradients flow backward from the Decoder's action outputs, through the sampled vector $z$, and all the way back up to the Encoder's attention layers.
+
+To update these parameters based on the gradients, the model formally uses the \textbf{AdamW (Adaptive Moment Estimation with Weight Decay)} optimizer. AdamW is specifically chosen over standard stochastic gradient descent (SGD) because it handles the complex, noisy loss landscapes of Transformers extremely well. AdamW does three specific things:
+
+\begin{enumerate}
+    \item \textbf{Momentum (First Moment):} It calculates an exponential moving average of the gradient. If the gradient keeps pointing in the "downward" direction across multiple batches, AdamW builds up "momentum" and takes larger steps in that direction, speeding up training.
+    \item \textbf{Adaptive Learning Rates (Second Moment):} Instead of using one global learning rate for all weights, AdamW calculates the moving average of the \textit{squared} gradients. If a specific weight (like a parameter deep in the ResNet) rarely gets updated, AdamW scales up its specific learning rate. If a weight gets updated aggressively and chaotically, AdamW scales down its learning rate to prevent the model from over-correcting.
+    \item \textbf{Weight Decay:} A small penalty (typically $1e-4$) is added directly to the weights themselves during the update step. This prevents any single weight from growing too large, which serves as a powerful regularization technique to prevent the network from memorizing the specific human noise in the training set (overfitting).
+\end{enumerate}
+
+Typically, the ACT architecture is trained with a global learning rate of $1e-5$ (with adaptive scaling handled internally by AdamW) spanning tens of thousands of epochs to ensure the loss smoothly converges to the optimal "canonical baseline".
 
 \end{document}

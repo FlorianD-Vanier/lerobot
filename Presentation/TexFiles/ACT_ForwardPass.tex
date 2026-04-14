@@ -45,14 +45,16 @@ Inside this Encoder, multi-head self-attention allows the \texttt{[CLS]} token t
     \item The single 512-dimensional vector located at the \texttt{[CLS]} position is kept. Because it spent the encoding process "listening" to the other tokens, it now contains a compressed mathematical summary of the sequence's "style."
 \end{itemize}
 
-\subsection{Predicting the Distribution: The Gaussian Assumption}
+\subsection{Predicting the Distribution: $\phi$ and the Gaussian Assumption}
 Instead of generating a static tensor, ACT assumes the "style" of a trajectory is a random process following a \textbf{Multivariate Gaussian Distribution}. To solve this, the summary \texttt{[CLS]} feature is passed through two linear layers to predict the statistical parameters of that distribution:
 \begin{enumerate}
     \item \textbf{Mean Vector ($\mu$):} The center of the "style" distribution in the 512-dimensional space.
     \item \textbf{Variance ($\sigma^2$):} A vector representing the diagonal variance (the "uncertainty" or "spread") of each style dimension.
 \end{enumerate}
 
-During training, the model performs \textbf{Dual Learning}: it simultaneously refines its ability to "translate" human motion (the Encoder's job, using weights $\phi$) while also sharpening its ability to "execute" those movements (the Policy Transformer's job, using weights $\theta$). 
+\textbf{A Note on Notation ($\phi$):} In Algorithm 1 of the original paper, this prediction step is denoted mathematically as sampling $z$ from a distribution $q_\phi(z|a, \bar{o})$. It is important to realize that $\phi$ does \textit{not} represent the mean or variance values themselves. Instead, $\phi$ represents the physical \textbf{neural network weights} (the parameters) of the CVAE Style Encoder. The function $q_\phi$ is the neural network computing the $\mu$ and $\sigma^2$ vectors based on those weights.
+
+During training, the model performs \textbf{Dual Learning}: it simultaneously refines its ability to "translate" human motion (updating the Encoder weights $\phi$) while also sharpening its ability to "execute" those movements (updating the Policy Transformer weights $\theta$). 
 
 \section{Sampling and the Reparameterization Trick}
 Instead of directly passing the mean as $z$, we sample from the predicted Gaussian distribution $\mathcal{N}(\mu, \sigma^2)$. 
@@ -62,7 +64,9 @@ To maintain differentiability for backpropagation during training, a concept cal
 Where $\epsilon$ is random noise sampled from a standard normal distribution $\mathcal{N}(0, 1)$. This $z$ vector is finally projected to the standard hidden dimension (e.g., 512).
 
 \section{The Policy Transformer: Action Generation}
-Now that $z$ has been sampled, the model moves to its second major component: the Policy Transformer. This is a standard Transformer Encoder-Decoder architecture responsible for physically commanding the robot.
+Now that $z$ has been sampled, the model moves to its second major component: the Policy Transformer. Structurally, this is a standard Transformer \textbf{Encoder-Decoder} architecture responsible for physically commanding the robot.
+
+\textbf{A Note on VAE Terminology ($\pi_\theta$):} In Algorithm 1 of the paper (Line 4), you will see the instruction to \textit{"Initialize decoder $\pi_\theta(a|o, z)$"}. This causes a massive terminology clash! In General Variational Autoencoder (VAE) literature, the entire half of the network that translates $z$ back into the real world is generically called the "Decoder." Physically, however, the ACT "Decoder" is actually the entire Policy Transformer module (which itself contains both an encoder and a decoder). The parameter $\theta$ represents the neural network weights of this entire Policy module.
 
 \subsection{The Policy Encoder: Building Context}
 The Policy Encoder takes the normalized sensor data and combines it with the style variable to create a unified, highly-informed understanding of the current "scene." The input sequence is formed by concatenating:
