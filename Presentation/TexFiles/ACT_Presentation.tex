@@ -1,0 +1,184 @@
+\documentclass[11pt, aspectratio=169]{beamer}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+% Beamer theme settings
+\usetheme{Madrid}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+
+\title{Action Chunking with Transformers (ACT)}
+\subtitle{Data Pipeline, Training, and Inference}
+\author{High-Level Overview}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+    \titlepage
+\end{frame}
+
+\begin{frame}{Outline}
+    \item Data preprocessing
+    \item Training forward pass
+    \item Loss and optimization
+    \item Inference
+\end{frame}
+
+\section{Data Pipeline}
+
+\begin{frame}{Introduction to ACT}
+    \begin{itemize}
+        \item \textbf{Action Chunking:} Predicts sequences of actions (chunks) rather than a single step, reducing compounding errors in fine manipulation.
+        \item \textbf{Modular Design:} Easily tailored for symmetric or asymmetric setups (e.g., single robotic arm with 2-3 cameras).
+        \item \textbf{CVAE Architecture:} Uses a Conditional Variational Autoencoder approach to capture the "style" of human demonstrations.
+        \item \textbf{High-Level Flow:} Real-time vision + Proprioception (joint state) + Style variable $\rightarrow$ Action sequence.
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Data Normalization}
+    \begin{itemize}
+        \item \textbf{Why Normalization?} Ensures numerical stability. Prevents motors with large ranges from overpowering fine gripper movements.
+        \item \textbf{Vision Data:} 
+        \begin{itemize}
+            \item Scales pixel values to $[0, 1]$.
+            \item Normalizes using distribution mean and standard deviation to center color channels and stabilize ResNet layers.
+        \end{itemize}
+        \item \textbf{Proprioception \& Actions:}
+        \begin{itemize}
+            \item Standardized using dataset statistics: $x_{norm} = \frac{x_{raw} - \mu}{\sigma}$.
+            \item Keeps all joint dimensions on a similar scale. Process is reversed before sending commands to hardware.
+        \end{itemize}
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Processing Vision and State}
+    \begin{itemize}
+        \item \textbf{Vision Pipeline (Cameras):}
+        \begin{itemize}
+            \item Images pass through a \textbf{ResNet-18} to extract feature grids.
+            \item Grids are flattened into tokens (e.g., 300 per camera).
+            \item \textbf{2D Positional Embeddings} are added so the network remembers \textit{where} features appeared spatially.
+            \item Tokens from all cameras are concatenated into a single visual sequence.
+        \end{itemize}
+        \item \textbf{Robot State (Proprioception):}
+        \begin{itemize}
+            \item The lower-dimensional joint state vector maps through a linear layer.
+            \item Produces a \textbf{single state token} matching the Transformer's hidden dimension.
+        \end{itemize}
+    \end{itemize}
+\end{frame}
+
+\section{Training Forward Pass}
+
+\begin{frame}{The CVAE Encoder (Capturing Style)}
+    \begin{itemize}
+        \item \textbf{Goal during training:} Learn the nuance of a human demonstration before the main Transformer handles the scene.
+        \item \textbf{Inputs to the Style Encoder:} 
+        \begin{itemize}
+            \item Current physical state (no images, to save computing power).
+            \item The exact \textbf{future actions} taken by the human.
+        \end{itemize}
+        \item \textbf{The [CLS] Token:} A designated "dummy" token that interacts bidirectionally with the whole sequence. It acts as a final summary bucket, discarding individual sequences to extract a single \textbf{Style Vector}.
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Distributions and Sampling}
+    \begin{itemize}
+        \item Instead of a static tensor, the style vector represents a \textbf{Gaussian distribution}.
+        \item The network predicts the statistical center (Mean $\mu$) and uncertainty (Variance $\sigma^2$).
+        \item \textbf{The Reparameterization Trick:} To allow training (backpropagation), we sample the style $z$ using random noise: $z = \mu + \sigma \cdot \epsilon$
+        \item This $z$ captures mathematical stochasticity and specific multi-modal aspects of the demonstration block.
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{The Policy Transformer (Action Generation)}
+    \begin{itemize}
+        \item \textbf{Policy Encoder:} Combines vision tokens, state token, and the sampled style token ($z$).
+        \begin{itemize}
+            \item Employs self-attention so these modalities can "talk" and produce a unified memory of the environment and intended style.
+        \end{itemize}
+        \item \textbf{Policy Decoder:} Queries the Encoder's memory using fixed position blocks.
+        \begin{itemize}
+            \item Generates a purely mathematical "sentence" representing the future path.
+            \item A final linear layer crushes these high-dimensional tokens back directly into physical motor instructions (the Action Chunk).
+        \end{itemize}
+    \end{itemize}
+\end{frame}
+
+\section{Loss and Optimization}
+
+\begin{frame}{The Dual Loss Objective}
+    The network improves by minimizing two mathematical penalties simultaneously:
+    \vspace{1em}
+    \begin{enumerate}
+        \item \textbf{L1 Reconstruction Loss:} Measures how closely the predicted chunk matches the human expert's ground-truth chunk.
+        \begin{itemize}
+            \item Uses L1 over Mean Squared Error (MSE) because physical robotics requires tight adherence to precise, fine-grained details without blurring.
+        \end{itemize}
+        \item \textbf{KL Divergence:} A penalty restricting how the "style" variable ($z$) behaves in multi-modal situations.
+    \end{enumerate}
+\end{frame}
+
+\begin{frame}{The Multi-Modal Averaging Problem}
+    \begin{itemize}
+        \item \textbf{The Problem:} Humans demonstrate tasks with natural variation (e.g., grabbing a cup by the handle or by the top).
+        \item Without a style variable, a basic network tries to mathematically average these conflicting demonstrations, resulting in poor execution (crashing into the cup).
+        \item \textbf{The Solution ($z$):} The style variable $z$ gives the model an excuse to safely separate these approaches. Positive $z$ = Grab the handle; Negative $z$ = Grab the top.
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Why the KL Divergence Prior?}
+    \begin{itemize}
+        \item We apply a massive penalty to force all natural style variations to cluster tightly around the mathematical origin $\mathcal{N}(0,I)$.
+        \item By penalizing large values, the origin ($z=0$) becomes the \textbf{Canonical Baseline}---the absolute safest standard way to complete the task.
+        \item It solves the issue for inference: when the human expert isn't there to provide a demonstration, setting $z=0$ cleanly breaks ties and prevents erratic behavior.
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Update of Weights (Optimization Architecture)}
+    \begin{itemize}
+        \item The entire CVAE and Policy networks are optimized simultaneously. Gradients flow backwards directly from the Decoder outputs to the Style Encoder mapping.
+        \item \textbf{AdamW Optimizer:} Preferred because it smoothly handles Transformer topologies.
+        \begin{itemize}
+            \item \textbf{Momentum:} Accelerates training in consistent downward slopes.
+            \item \textbf{Adaptive Learning:} Individually scales learning rates up or down per weight, stabilizing deep internal layers.
+            \item \textbf{Weight Decay:} A regularization technique that stops any single weight from ballooning, combatting overfitting to noise.
+        \end{itemize}
+    \end{itemize}
+\end{frame}
+
+\section{Inference}
+
+\begin{frame}{The Simplified Inference Pass}
+    \begin{itemize}
+        \item In deployment, there is no human future data to interpret. The \textbf{Style Encoder is disabled and discarded}.
+        \item \textbf{Hardcoding $z$:} We forcefully set $z = \vec{0}$, dropping the robot directly onto its safest, most robust core strategy.
+        \item \textbf{Fast Loop:} The active pipeline distills down to merely reading cameras and proprioception, passing them to the Policy Encoder with $z=0$, and executing the chunk.
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{The Overlapping Chunk Problem}
+    \begin{itemize}
+        \item A single prediction provides a 100-step future action sequence.
+        \item Playing 100 steps blindly to the end causes highly unreactive robotic motion---the robot wouldn't notice if something shifted.
+        \item \textbf{High Frequency Queries:} ACT re-runs inference every few milliseconds.
+        \item \textbf{The Conflict:} Because of constant replanning, the framework ends up with a queue of \textit{overlapping predictions competing for the exact same physical motor execution} at any given millisecond.
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Temporal Ensembling}
+    \begin{itemize}
+        \item Overlapping chunk conflicts are solved using \textbf{Temporal Ensembling}.
+        \item Instead of letting the newest chunk override older ones, they are mathematically blended together via \textbf{Exponential Weighting}.
+        \item \textbf{Oldest Predictions (High Weights):} Provide a stable, committed trajectory core over time.
+        \item \textbf{Newest Predictions (Low Weights):} Act as subtle "corrective nudges" accommodating immediate visual changes.
+        \item \textbf{Result:} Smooth, continuous, remarkably reactive long-horizon policies.
+    \end{itemize}
+\end{frame}
+
+\end{document}
