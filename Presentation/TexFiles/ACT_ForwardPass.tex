@@ -32,16 +32,17 @@ In paper terminology, the full observation $o_t$ includes both images and state.
     \item \textbf{[CLS] Token:} As described in Section IV.C (page 6) of the original paper, a learnable "Class" token is prepended to the input sequence. Because Transformers output a sequence of the same length as their input, we need a mechanism to condense a list of $k$ actions into a \textit{single} vector. The \texttt{[CLS]} token acts as a \textbf{Designated Style Extractor}---a dummy variable whose sole purpose is to "listen" to all the other tokens and serve as the final summary bucket.
 \end{itemize}
 
-\section{The Encoder Forward Pass}
-The inputs are mapped to the hidden dimension size (e.g., 512) and passed through a Transformer Encoder. The paper refers to this as "BERT-like." This simply means it is a bidirectional encoder: instead of reading actions sequentially from left to right (like predicting the next word in a sentence), it looks at the entire sequence of future actions all at once to fully understand the context.
+\section{The Style Encoder Forward Pass (Encoder-Only)}
+The inputs are mapped to the hidden dimension size (e.g., 512) and passed through the Style Transformer. It is crucial to note that this module is an \textbf{Encoder-Only} architecture (like BERT)---it does \textit{not} have a decoder. It simply takes the sequence of inputs and outputs an enriched sequence of the exact same length. 
 
-This architecture acts as a \textbf{Universal Translator}: it reads a "paragraph" of complex human physical movements and translates it into a single "word" (the style vector $z$). This forces the model to take everything that happened in a long, complicated human demonstration and summarize it into one single spot (the final \texttt{[CLS]} token). 
+This architecture acts as a \textbf{Universal Translator}: it reads a "paragraph" of complex human physical movements bidirectionally (all at once instead of sequentially) and translates it into a single "word" (the style vector $z$).
 
 \subsection{Aggregating Information}
-Inside this Encoder, multi-head self-attention allow the \texttt{[CLS]} token to interact with the entire mathematical sequence of future actions and the proprioception vector. By the time the data passes through all the layers:
+Inside this Encoder, multi-head self-attention allows the \texttt{[CLS]} token to interact with the entire mathematical sequence of future actions and the proprioception vector. By the time the data passes through all the layers:
 \begin{itemize}
-    \item The output vectors corresponding to the individual actions are discarded.
-    \item The single vector located at the \texttt{[CLS]} position is extracted. Because of self-attention, this single vector now contains a summarized mathematical representation of the entire human action sequence's "style" in that specific state.
+    \item The model outputs a sequence of exactly 102 tokens.
+    \item \textbf{The Extraction}: The 101 output vectors corresponding to the individual actions and proprioception are completely discarded.
+    \item The single 512-dimensional vector located at the \texttt{[CLS]} position is kept. Because it spent the encoding process "listening" to the other tokens, it now contains a compressed mathematical summary of the sequence's "style."
 \end{itemize}
 
 \subsection{Predicting the Distribution: The Gaussian Assumption}
@@ -64,22 +65,21 @@ Where $\epsilon$ is random noise sampled from a standard normal distribution $\m
 Now that $z$ has been sampled, the model moves to its second major component: the Policy Transformer. This is a standard Transformer Encoder-Decoder architecture responsible for physically commanding the robot.
 
 \subsection{The Policy Encoder: Building Context}
-The Policy Encoder takes the normalized sensor data and combines it with the style variable to create a unified understanding of the current "scene."
-The input sequence is constructed by concatenating:
+The Policy Encoder takes the normalized sensor data and combines it with the style variable to create a unified, highly-informed understanding of the current "scene." The input sequence is formed by concatenating:
 \begin{enumerate}
-    \item \textbf{Vision Tokens:} The $600-900$ visual features extracted from the 2-3 cameras (plus 2D positional embeddings).
-    \item \textbf{Proprioception Token:} The single token representing the robot's state.
+    \item \textbf{Vision Tokens:} The visual features from the cameras.
+    \item \textbf{Proprioception Token:} The token representing the robot's state.
     \item \textbf{Style Token:} The projected $z$ vector.
 \end{enumerate}
 
-Inside the Policy Encoder, self-attention layers allow all these modalities to interact. The wrist camera features can "contextualize" themselves using the joint angles, while keeping the human's style ($z$) in mind. The output is a highly enriched set of memory tokens.
+Inside the Policy Encoder, self-attention layers effectively lock all these distinct modalities in a room and allow them to "speak" to each other. By exchanging information, the wrist camera token learns what the human's intended style ($z$) is, while the style token learns exactly where the robot arm currently sits. The output is a deeply unified "memory" of the environment.
 
 \subsection{The Policy Decoder: Predicting the Chunk}
-The Policy Decoder's job is to read the Encoder's memory and output a sequence of $k$ future actions (e.g., $k=100$).
+While the Encoder builds the context, the Decoder acts as the translator. Its job is to read the Encoder's memory and "translate" it into a new "sentence" of future movements.
 \begin{itemize}
-    \item \textbf{Queries:} Instead of feeding inputs sequentially like a language model, the Decoder is given $k$ fixed positional embeddings. Think of these as $100$ empty "slots" asking the Encoder, "What should action 1 be?", "What should action 2 be?", etc.
-    \item \textbf{Cross-Attention:} Through cross-attention, these slots query the rich memory from the Policy Encoder, filling themselves with geometric and semantic information.
-    \item \textbf{Output ($\hat{a}_{t:t+k}$):} The output of the Decoder is passed through a final linear layer to predict the $k$ normalized, continuous joint actions for the robot.
+    \item \textbf{Queries (The Blank Sentence):} Instead of generating tokens sequentially like ChatGPT, the Decoder is handed $k$ fixed positional embeddings all at once. Think of these as $100$ empty "slots" asking the Encoder, "Given this complex context, what should the first move be? What about the second?"
+    \item \textbf{Cross-Attention:} Through cross-attention, these empty slots query the rich memory from the Policy Encoder, filling themselves with specific mathematical plans. The result is a sentence of \textit{purely mathematical action tokens} (each still 512-dimensional).
+    \item \textbf{The Final Layer ("De-tokenization"):} Because robots cannot understand 512-dimensional abstract tokens, the output of the Decoder is passed through a final Multi-Layer Perceptron (usually a simple linear layer). This crushes the high-dimensional tokens back down into the actual physical motor dimensions (like 6 or 7 normalized joint angles) representing $\hat{a}_{t:t+k}$.
 \end{itemize}
 
 \section{Preparing for the Loss Function}
